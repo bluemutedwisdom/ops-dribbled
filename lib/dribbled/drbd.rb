@@ -9,8 +9,8 @@ module Dribbled
     attr_reader :resources_cfg_raw, :resources_run_raw
 
     PROCDRBD_VERSION_RE = /^version:\s+(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)\s+\(api:(?<api>\d+)\/proto:(?<proto>[0-9-]+)/
-    PROCDRBD_RESOURCE_RE = /^\s*(?<id>\d+):\s+cs:(?<cstate>[\w\/]+)\s+(st|ro):(?<state>[\w\/]+)\s+ds:(?<dstate>[\w\/]+)\s+/
-    PROCDRBD_URESOURCE_RE = /^\s*(?<id>\d+):\s+cs:(?<cstate>[\w\/]+)/
+    PROCDRBD_RESOURCE_RE = /^\s*(?<id>\d+):\s+cs:(?<cs>[\w\/]+)\s+(st|ro):(?<ro>[\w\/]+)\s+ds:(?<ds>[\w\/]+)\s+/
+    PROCDRBD_URESOURCE_RE = /^\s*(?<id>\d+):\s+cs:(?<cs>[\w\/]+)/
     PROCDRBD_ACTIVITY_RE = /^\s+\[[.>=]+\]\s+(?<activity>[a-z']+):\s+(?<percent>[0-9.]+)%\s+\(\d+\/\d+\)M(finish:\s+(?<finish>[0-9:]+)\s+)*/
     PROCDRBD_ACTIVITY_STATUS_RE = /^\s+finish:\s+(?<finish>[0-9:]+)\s+/
 
@@ -36,7 +36,7 @@ module Dribbled
     end
 
     def version
-      "#@version_major.#@version_minor.#@version_path"
+      "#{@version_major}.#{@version_minor}.#{@version_path}"
     end
 
     protected
@@ -44,7 +44,7 @@ module Dribbled
       def _read_procdrbd(resources_run_src)
         @log.debug "Running configuration source: #{resources_run_src}" unless @log.nil?
         resources_run = {}
-        @resources_run_raw = File.open(resources_run_src,"r") { |f| f.read }
+        @resources_run_raw = File.open(resources_run_src,'r') { |f| f.read }
         r = nil
         @resources_run_raw.each_line do |line|
           if /^\s*(\d+):/.match(line)
@@ -53,11 +53,11 @@ module Dribbled
             resources_run[r].in_kernel = true
             if PROCDRBD_RESOURCE_RE.match(line)
               m = PROCDRBD_RESOURCE_RE.match(line)
-              resources_run[r].cstate = m[:cstate]
-              resources_run[r].state  = m[:state]
-              resources_run[r].dstate = m[:dstate]
+              resources_run[r].cs = m[:cs]
+              resources_run[r].ro  = m[:ro]
+              resources_run[r].ds = m[:ds]
             elsif PROCDRBD_URESOURCE_RE.match(line)
-              resources_run[r].cstate = PROCDRBD_URESOURCE_RE.match(line)[:cstate]
+              resources_run[r].cs = PROCDRBD_URESOURCE_RE.match(line)[:cs]
             end
             @log.debug "  #{resources_run[r].inspect}" unless @log.nil?
           elsif PROCDRBD_ACTIVITY_RE.match(line)
@@ -99,14 +99,14 @@ module Dribbled
           end
           if self[r].nil?
             self[r] = DrbdResource.new r, @hostname
-            self[r].cstate = "StandAlone"
-            self[r].dstate = "DUnknown"
-            self[r].state = "Unknown"
+            self[r].cs = 'StandAlone'
+            self[r].ds = 'DUnknown'
+            self[r].ro = 'Unknown'
           end
           self[r].name = name
           self[r].in_configuration = true
-          @log.debug "    resource: #{r}, state: #{self[r].state}"
-          if self[r].state == 'Primary/Secondary'
+          @log.debug "    resource: #{r}, state: #{self[r].ro}"
+          if self[r].ro == 'Primary/Secondary'
             if hostname == @hostname
               @log.debug "    resource: #{r}, primary"
               self[r].primary[:disk] = disk
@@ -118,7 +118,7 @@ module Dribbled
               self[r].secondary[:device] = device
               self[r].secondary[:hostname] = hostname
             end
-          elsif self[r].state == 'Secondary/Primary' or self[r].state == 'Unknown'
+          elsif self[r].ro == 'Secondary/Primary' or self[r].ro == 'Unknown'
             if hostname == @hostname
               @log.debug "    resource: #{r}, secondary"
               self[r].secondary[:disk] = disk
@@ -138,15 +138,15 @@ module Dribbled
   class DrbdResource
 
     attr_reader :id
-    attr_accessor :name, :cstate, :dstate, :state, :config, :primary, :secondary, :activity, :percent, :finish, :in_kernel, :in_configuration
+    attr_accessor :name, :cs, :ds, :ro, :config, :primary, :secondary, :activity, :percent, :finish, :in_kernel, :in_configuration
 
     def initialize(res,hostname)
       @id = res
       @name = nil
       @config = nil
-      @dstate = nil
-      @cstate = nil
-      @state = nil
+      @ds = nil
+      @cs = nil
+      @ro = nil
       @activity = nil
       @percent = nil
       @finish = nil
@@ -165,10 +165,10 @@ module Dribbled
     end
 
     def to_s
-      ph = @primary[:hostname].gsub(/\.[a-z0-9-]+\.[a-z0-9-]+$/,"") unless @primary[:hostname].nil?
-      sh = @secondary[:hostname].gsub(/\.[a-z0-9-]+\.[a-z0-9-]+$/,"") unless @secondary[:hostname].nil?
+      ph = @primary[:hostname].gsub(/\.[a-z0-9-]+\.[a-z0-9-]+$/,'') unless @primary[:hostname].nil?
+      sh = @secondary[:hostname].gsub(/\.[a-z0-9-]+\.[a-z0-9-]+$/,'') unless @secondary[:hostname].nil?
 
-      if @state == 'Primary/Secondary'
+      if @ro == 'Primary/Secondary'
         h1 = ph; dev1 = @primary[:device]
         h2 = sh; dev2 = @secondary[:device]
       else
@@ -176,13 +176,13 @@ module Dribbled
         h2 = ph; dev2 = @primary[:device]
       end
 
-      percent_finish = @activity.nil? ? nil : "[%3d%% %8s]" % [@percent,@finish]
+      percent_finish = @activity.nil? ? nil : '[%3d%% %8s]' % [@percent,@finish]
 
-      "%2d %6s %-13s %15s %-22s %-20s %10s %-11s %10s %-11s" % [@id,@name,@cstate,percent_finish,@dstate,@state,h1,dev1,h2,dev2]
+      '%2d %6s %-13s %15s %-22s %-20s %10s %-11s %10s %-11s' % [@id,@name,@cs,percent_finish,@ds,@ro,h1,dev1,h2,dev2]
     end
 
     def inspect
-      "#{self.class}: #@id[#@name]: #@cstate,#@dstate,#@state"
+      "#{self.class}: #{@id}[#{@name}]: #{@cs},#{@ds},#{@ro}"
     end
 
     def check

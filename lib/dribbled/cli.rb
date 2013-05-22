@@ -112,7 +112,7 @@ module Dribbled
       output_message opts, 0 if (@arguments.size == 0 and @whoami != :check_drbd) or @global_options[:HELP]
 
       @action = @whoami == :check_drbd ? :check : @arguments.shift.to_sym
-      raise OptionParser::InvalidArgument, "invalid action #@action" if actions[@action].nil?
+      raise OptionParser::InvalidArgument, "invalid action #{@action}" if actions[@action].nil?
       actions[@action].order!(@arguments)
       case @action
         when :show
@@ -215,29 +215,31 @@ module Dribbled
       # + dstate should be: UpToDate/UpToDate
 
       @drbdset.each do |r,res|
-        next if res.cstate == 'Unconfigured'
+        next if res.cs == 'Unconfigured'
 
-        po_cstate = ""
-        po_dstate = ""
+        po_cs = ''
+        po_ds = ''
+        po_ro = ''
 
-        po_cstate = "cs:#{res.cstate}" unless res.cstate == "Connected" and res.in_kernel? and res.in_configuration?
-        po_dstate = "ds:#{res.dstate}" unless res.dstate == "UpToDate/UpToDate" and res.in_kernel? and res.in_configuration?
+        po_cs = "cs:#{res.cs}" unless res.cs == 'Connected' and res.in_kernel? and res.in_configuration?
+        po_ds = "ds:#{res.ds}" unless res.ds == 'UpToDate/UpToDate' and res.in_kernel? and res.in_configuration?
+        po_ro = "ro:#{res.ro}" unless (res.ro == 'Primary/Secondary' or res.ro == 'Secondary/Primary') and res.in_kernel? and res.in_configuration?
 
-        unless po_cstate.gsub('cs:','').empty? and po_dstate.gsub('ds:','').empty?
-          if ['SyncSource','SyncTarget','VerifyS','VerifyT','PausedSyncS','PausedSyncT','StandAlone'].include? res.cstate
+        unless po_cs.gsub('cs:','').empty? and po_ds.gsub('ds:','').empty?
+          if ['SyncSource','SyncTarget','VerifyS','VerifyT','PausedSyncS','PausedSyncT','StandAlone'].include? res.cs
             plugin_status = :warning
-            plugin_output += res.percent.nil? ? " #{res.id}:#{po_cstate};#{po_dstate}" : " #{res.id}:#{po_cstate}[#{res.percent}%,#{res.finish}];#{po_dstate}"
+            plugin_output += res.percent.nil? ? " #{res.id}:#{po_cs};#{po_ds};#{po_ro}" : " #{res.id}:#{po_cs}[#{res.percent}%,#{res.finish}];#{po_ds};#{po_ro}"
           elsif not res.in_configuration?
             plugin_status = :warning
-            plugin_output += " #{res.id}[unconfigured]>#{po_cstate}/;#{po_dstate}"
+            plugin_output += " #{res.id}[unconfigured]>#{po_cs}/;#{po_ds};#{po_ro}"
           else
-            plugin_output += " #{res.id}>#{po_cstate};#{po_dstate}"
+            plugin_output += " #{res.id}>#{po_cs};#{po_ds};#{po_ro}"
             plugin_status = :critical
           end
         end
       end
 
-      plugin_output = " all DRBD resources Connected, UpToDate/UpToDate" if plugin_output.empty? and plugin_status.empty?
+      plugin_output = ' all DRBD resources Connected, UpToDate/UpToDate' if plugin_output.empty? and plugin_status.empty?
       plugin_status = :ok if plugin_status.empty?
 
       case @action_options[:monitor]
@@ -271,7 +273,7 @@ module Dribbled
         loop do
           @drbdset = DrbdSet.new @global_options
           @drbdset.each do |r,resource|
-            if resource.cstate =~ /#{@action_options[:cstate]}/ or resource.dstate =~ /#{@action_options[:dstate]}/ or resource.name == @action_options[:resource]
+            if resource.cs =~ /#{@action_options[:cstate]}/ or resource.ds =~ /#{@action_options[:dstate]}/ or resource.name == @action_options[:resource]
               puts resource
             end
           end
