@@ -15,6 +15,13 @@ module Dribbled
     COMPONENTS = %w(resources)
     DEFAULT_CONFIG_FILE = File.join(ENV['HOME'],"/.senedsa/config")
 
+    STATUS = {
+      :ok       =>  OpenStruct.new({ :num => 0, :str => "OK",       }),
+      :warning  =>  OpenStruct.new({ :num => 1, :str => "WARNING",  }),
+      :critical =>  OpenStruct.new({ :num => 2, :str => "CRITICAL", }),
+      :unknown  =>  OpenStruct.new({ :num => 3, :str => "UNKNOWN"   })
+    }
+
     def initialize(arguments)
       @arguments = arguments
       @whoami = File.basename($PROGRAM_NAME).to_sym
@@ -198,8 +205,8 @@ module Dribbled
 
     def run_check
 
-      plugin_output = ""
-      plugin_status = ""
+      output = ''
+      status = :ok
 
       # check for configuration vs running resources
 
@@ -216,42 +223,21 @@ module Dribbled
 
       @drbdset.each do |r,res|
         next if res.cs == 'Unconfigured'
-
-        po_cs = ''
-        po_ds = ''
-        po_ro = ''
-
-        po_cs = "cs:#{res.cs}" unless res.cs == 'Connected' and res.in_kernel? and res.in_configuration?
-        po_ds = "ds:#{res.ds}" unless res.ds == 'UpToDate/UpToDate' and res.in_kernel? and res.in_configuration?
-        po_ro = "ro:#{res.ro}" unless (res.ro == 'Primary/Secondary' or res.ro == 'Secondary/Primary') and res.in_kernel? and res.in_configuration?
-
-        unless po_cs.gsub('cs:','').empty? and po_ds.gsub('ds:','').empty?
-          if ['SyncSource','SyncTarget','VerifyS','VerifyT','PausedSyncS','PausedSyncT','StandAlone'].include? res.cs
-            plugin_status = :warning
-            plugin_output += res.percent.nil? ? " #{res.id}:#{po_cs};#{po_ds};#{po_ro}" : " #{res.id}:#{po_cs}[#{res.percent}%,#{res.finish}];#{po_ds};#{po_ro}"
-          elsif not res.in_configuration?
-            plugin_status = :warning
-            plugin_output += " #{res.id}[unconfigured]>#{po_cs}/;#{po_ds};#{po_ro}"
-          else
-            plugin_output += " #{res.id}>#{po_cs};#{po_ds};#{po_ro}"
-            plugin_status = :critical
-          end
-        end
+        s,o = res.status
+        output << " #{o}"
+        status = s if STATUS[s].num > STATUS[status].num
       end
-
-      plugin_output = ' all DRBD resources Connected, UpToDate/UpToDate' if plugin_output.empty? and plugin_status.empty?
-      plugin_status = :ok if plugin_status.empty?
 
       case @action_options[:monitor]
         when :nagios
           case @action_options[:mode]
             when :active
-              puts "#{plugin_status.to_s.upcase}:#{plugin_output}"
-              exit SendNsca::STATUS[plugin_status]
+              puts "#{status.to_s.upcase}:#{output}"
+              exit SendNsca::STATUS[status]
             when :passive
               sn = SendNsca.new @action_options
               begin
-                sn.send plugin_status, plugin_output
+                sn.send status, output
               rescue SendNsca::SendNscaError => e
                 output_message "send_nsca failed: #{e.message}", 1
               end

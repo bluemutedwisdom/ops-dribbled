@@ -164,7 +164,34 @@ module Dribbled
       @in_configuration
     end
 
-    def to_s
+    def status
+      s = :unknown
+      o = 'unable to assert health'
+
+      if self.cs == 'Unconfigured'
+        [:ok,"#{self.id}[unconfigured]"]
+      else
+        if self.in_kernel? and self.in_configuration?
+          if self.cs == 'Connected' and self.ds == 'UpToDate/UpToDate' and (self.ro == 'Primary/Secondary' or self.ro == 'Secondary/Primary')
+            s = :ok
+          else
+            if ['SyncSource','SyncTarget','VerifyS','VerifyT','PausedSyncS','PausedSyncT','StandAlone'].include? self.cs
+              s = :warning
+            elsif not self.in_configuration?
+              s = :warning
+            else
+              s = :critical
+            end
+          end
+        else
+          s = :unknown
+        end
+      end
+
+      [s,self.to_s(:concise)]
+    end
+
+    def to_s(mode=:line)
       ph = @primary[:hostname].gsub(/\.[a-z0-9-]+\.[a-z0-9-]+$/,'') unless @primary[:hostname].nil?
       sh = @secondary[:hostname].gsub(/\.[a-z0-9-]+\.[a-z0-9-]+$/,'') unless @secondary[:hostname].nil?
 
@@ -178,7 +205,21 @@ module Dribbled
 
       percent_finish = @activity.nil? ? nil : '[%3d%% %8s]' % [@percent,@finish]
 
-      '%2d %6s %-13s %15s %-22s %-20s %10s %-11s %10s %-11s' % [@id,@name,@cs,percent_finish,@ds,@ro,h1,dev1,h2,dev2]
+      case mode
+        when :line
+          fmt_string = '%2d %6s %-13s %15s %-22s %-20s %10s %-11s %10s %-11s'
+          percent_finish = @activity.nil? ? nil : '[%3d%% %8s]' % [@percent,@finish]
+        when :concise
+          fmt_string = '%s>%s:%s%s:%s:%s'
+          percent_finish = @activity.nil? ? nil : '[%d%%,%s]' % [@percent,@finish]
+        when :verbose
+          fmt_string = '%s'
+        else
+          fmt_string = '%s'
+      end
+
+      fmt_string % [@id,@name,@cs,percent_finish,@ro,@ds,h1,dev1,h2,dev2]
+
     end
 
     def inspect
